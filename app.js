@@ -14,49 +14,25 @@ const _read = (file) => fs.readFileSync(file, 'utf-8')
 
 const parse_error = e => {
 
-    const error = e.toString();
+  const lines = e.split(`\n`)
 
-    const stacktrace    = error.toString().split('at ')
-    const errs          = error.toString().split('Error: ')
+  // return R.merge
 
-
-    const err = errs[1].split(`\n`)[0]
-
-    const files = stacktrace.filter(l=>l.indexOf(__dirname)>0).map(l=>l.split(')')[0].split('(')[1].split(':')).map(l=>{return {
-        'file': l[0], 'line':l[1], column: l[2]}})
-
-    return {err, files}
-
-}
-
-
-// TODO: join two functions
-const parse_error2 = e => {
-
-    const lines = e.split(`\n`)
-
-    // return R.merge
-
-    return {
-        f : R.zipObj(['name', 'line'], lines[0].split(':')),
-        e : R.zipObj(['type', 'text'], lines[4].split('Error: '))
-    }
+  return {
+    f : R.zipObj(['name', 'line'], lines[0].split(':')),
+    e : R.zipObj(['type', 'text'], lines[4].split('Error: '))
+  }
 
 }
 //// FUNCTIONS
 
-const in_dependencies = (varname) => {
-
-    const deps = _.keys(parsePackage('./package.json').parsed.data.dependencies);
-
-    return deps.indexOf(varname) > -1
-}
+const get_dependencies = () => _.keys(parsePackage('./package.json').parsed.data.dependencies)
 
 const list_vars = R.compose(
-    R.flatten,
-    R.map(n=>n.declarations.map(m=>m.id.name)),
-    R.filter(t=>t['type'] == 'VariableDeclaration')
-    )
+  R.flatten,
+  R.map(n=>n.declarations.map(m=>m.id.name)),
+  R.filter(t=>t['type'] == 'VariableDeclaration')
+  )
 
 const get_vars = file => list_vars(acorn.parse(_read(file)).body)
 
@@ -65,50 +41,41 @@ const prepend = (f, str) => fs.writeFileSync(f,  str + '\n' + _read(f), 'utf-8')
 const add_module = (v, file) => prepend(file, `const ${v} = require('${v}') //✓`)
 
 const similar = a => b => {
-    return R.symmetricDifference(a, b).length < 3 // 3 is magic
+  return R.symmetricDifference(a, b).length < 3 // 3 is magic
 }
 
 const find_typo = (varname, file)=> get_vars(file).find(similar(varname))
 
 const fix_typo = (varname, typo, file, line)=>{
 
-    const lines = _read(file).split(`\n`)
+  const lines = _read(file).split(`\n`)
 
-    lines[line-1] = lines[line-1].replace(new RegExp(varname,'g'), typo)
-        + ` //✓ ${varname} -->> ${typo}`
+  lines[line-1] = lines[line-1].replace(varname, typo)
+    // + ` //✓ ${varname} -->> ${typo}`
 
-    return fs.writeFileSync(file,  lines.join(`\n`), 'utf-8')
+  return fs.writeFileSync(file,  lines.join(`\n`), 'utf-8')
 }
 
 const fix_line = fixer=>f=>{
 
-    const {line, name} = f
-    const lines  = _read(name).split(`\n`)
+  const {line, name} = f
+  const lines  = _read(name).split(`\n`)
 
-    lines[line-1] = fixer(lines[line-1])
+  lines[line-1] = fixer(lines[line-1])
 
-    fs.writeFileSync(name, lines.join(`\n`), 'utf-8')
+  fs.writeFileSync(name, lines.join(`\n`), 'utf-8')
 
-    return lines[line-1]
+  return lines[line-1]
 }
 
-const fix_function_def = fix_line(s=>s.replace(new RegExp('=>','g'), '() =>') + ` //✓ => -->> () =>`)
+const fix_function_def = fix_line(s=>s.replace('=>', '() =>'))
+   // + ` //✓ => -->> () =>`)
 
 const add_closing_parenthesis = fix_line(s=>s+`) //✓`)
 
 
 // check this out
-const check = error => test => pos => {
-
-    if (error.indexOf(test)>-1) {
-        const keyword = error.split(test)[pos]
-        return keyword;
-    } else {
-
-        return false
-    }
-
-}
+const check = error => test => pos => error.indexOf(test)>-1 && error.split(test)[pos]
 
 /// ENGINE
 
@@ -117,146 +84,153 @@ const run=()=>setTimeout(_run, 0) // INHALE
 
 const _run = () =>{
 
-    const _process = spawn('node', ['test.js']);
+  const _process = spawn('node', ['test.js']);
 
-    _process.stdout.on('data', d=>console.log(d.toString()));
+  _process.stdout.on('data', d=>console.log(d.toString()));
 
-    let error = ''
+  let error = ''
 
-    _process.stderr.on('data', data => error+=data);
+  _process.stderr.on('data', data => error+=data);
 
-    _process.on('close', (code) => {
+  _process.on('close', (code) => {
 
-        if (code == 0 || code == null) {return;}
+    if (code == 0 || code == null) {return;}
 
-        const {err, files} = parse_error(error);
+    const {e, f} = parse_error(error);
 
-        const file = files[0] && files[0].file // we assume error in this file
+    console.log(`ERROR: ${e.text} IN FILE: ${f.name}`);
 
-        const {e, f} = parse_error2(error);
+    // console.log(e);
 
-        if (!err || !file) {
+    const _c = check(e.text)
 
-            console.log(`ERROR: ${e.text} IN FILE: ${f.name}`);
 
-        } else {
+    /* 1 */
+    const m_name = _c('Cannot find module ')(1)
 
-            console.log(`ERROR: ${err} IN FILE: ${file}`);
+    if (m_name) {
+
+      if (m_name.indexOf('/')>-1) {  // local
+        return;
+      }
+
+      console.log(`INSTALLING ${m_name}`);
+
+      exec(`npm install --save ${m_name}`, (e, stdout, stderr)=>{
+        if (!e) {
+          return run();
         }
+      });
 
-        // console.log(e);
+      return;
 
-        const _c = check(e.text)
+    }
 
-        const m_name = _c('Cannot find module ')(1)
+    /* 2 */
+    const v = _c(' is not defined')(0)
 
-        if (m_name) {
+    if (v) {
 
-            if (m_name.indexOf('/')>-1) {  // local
-                return;
-            }
+      const deps = get_dependencies()
 
-            console.log(`INSTALLING ${m_name}`);
+      if (deps.includes(v)) {
+        add_module(v, f.name);
+        console.log(`+ ${v} initialize`);
+        return run();
+      }
 
-            exec(`npm install --save ${m_name}`, (e, stdout, stderr)=>{
-                if (!e) {
-                    return run();
-                }
-            });
-
-            return;
-
+      if (v == '_') {
+        for (_v of ['underscore', 'lodash']) {
+          if (deps.includes(_v)) {
+            prepend(f.name, `const _ = require('${_v}')`)
+            console.log(`+ ${_v} initialize`);
+            return run()
+          }
         }
+      }
 
-        const v = _c(' is not defined')(0)
 
-        if (v) {
+      const typo = find_typo(v, f.name);
 
-            if (in_dependencies(v)) {
-                add_module(v, file);
-                console.log(`+ ${v} initialize`);
-                return run();
-            }
+      if (typo) {
+        fix_typo(v, typo, f.name, f.line);
+        console.log(`fixing TYPO: ${v} -->> ${typo}`);
+        return run();
+      }
+    }
 
-            const typo = find_typo(v, file);
+    /* 3 */
+    const naf = _c(' is not a function')(0)
 
-            if (typo) {
-                fix_typo(v, typo, file, files[0].line);
-                console.log(`fixing TYPO: ${v} -->> ${typo}`);
-                return run();
-            }
-        }
+    if (naf=='undefined') {
 
-        const naf = _c(' is not a function')(0)
+    } else {
 
-        if (naf=='undefined') {
+    }
 
-        } else {
+    /* 4 */
+    const u_tok = _c('Unexpected token ')(1)
 
-        }
+    if (u_tok == '=>') {
+      const fixed_line = fix_function_def(f)
+      console.log(`fixing function definition: ${fixed_line}`);
+      return run();
+    }
 
-        const u_tok = _c('Unexpected token ')(1)
+    /* 5 */
+    const missing = _c(' after argument list')(0)
 
-        if (u_tok == '=>') {
-            const fixed_line = fix_function_def(f)
-            console.log(`fixing function definition: ${fixed_line}`);
-            return run();
-        }
+    if (missing) {
+      const missing_symbol = missing.split('missing ')[1]
 
-        if (u_tok == ',') { // last element in json
+      if (missing_symbol == ')') {
 
-            // console.log(e);
-            // console.log(err);
-        }
+        add_closing_parenthesis(f);
+        console.log(`adding closing parenthesis in line ${f.line} of ${f.name.split(__dirname)[1]}`);
+        return run()
+      }
+    }
 
-        const missing = _c(' after argument list')(0)
-
-        if (missing) {
-            const missing_symbol = missing.split('missing ')[1]
-
-            if (missing_symbol == ')') {
-
-                add_closing_parenthesis(f);
-                console.log(`adding closing parenthesis in line ${f.line} of ${f.name.split(__dirname)[1]}`);
-                return run()
-            }
-        }
+    /* 6 */
 
 
 
-        // TODO:
-            // }
-            // ^
-            // SyntaxError: missing ) after argument list
-            // this is callback lazy-print
 
-        // TODO: missing ) after arguments list
-        // TODO:
-            // },
-            //  ^
-            // SyntaxError: Unexpected token ,
-            // last element in json
+    // TODO:
+      // }
+      // ^
+      // SyntaxError: missing ) after argument list
+      // this is callback lazy-print
+
+    // TODO: missing ) after arguments list
+    // TODO:
+      // },
+      //  ^
+      // SyntaxError: Unexpected token ,
+      // last element in json
 
 
-        // TODO: search for github for unfinished consts
+    // TODO: search for github for unfinished consts
 
-        // TODO: little refactoring
+    // TODO: little refactoring
 
-        console.log({error: e.text, file: f.name.split(__dirname)[1], line: f.line});
+    // TODO: Identifier 'underscore' has already been declared
 
-        console.log('✗');
+    console.log({error: e.text, file: f.name.split(__dirname)[1], line: f.line});
 
-        // process.exit()
+    console.log('✗');
 
-    })
+    // process.exit()
 
-    // process.stdin.resume();
+  })
 
-    process.on('SIGINT',(code) => {
-        // console.log(code);
-        console.log('\nBye');
-        process.exit();
-    })
+  // process.stdin.resume();
+
+  process.on('SIGINT',(code) => {
+    // console.log(code);
+    console.log('\nBye');
+    process.exit();
+  })
 }
 
 
