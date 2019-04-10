@@ -131,7 +131,7 @@ const _run = () =>{
 
     if (v) {
 
-      const deps = get_dependencies()
+      const deps = get_dependencies().concat(['fs', 'path'])
 
       if (deps.includes(v)) {
         add_module(v, f.name);
