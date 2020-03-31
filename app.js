@@ -209,6 +209,10 @@ const _run = () =>{
       // SyntaxError: Unexpected token ,
       // last element in json
 
+    // const gh = new GitHub(token: 'ffff')
+    // ^^^^^
+    // SyntaxError: missing ) after argument list
+
 
     // TODO: search for github for unfinished consts
 
