@@ -15,7 +15,7 @@
     "fs-extra": "^7.0.1",
     "parse-package": "^3.0.1",
     "ramda": "^0.27.0",
-    "underscore": "^1.9.1"
+    "underscore": "^1.12.1"
   },
   "devDependencies": {}
 }
